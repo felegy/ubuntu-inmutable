@@ -1,11 +1,19 @@
 # CI/CD Notes
 
-This project uses a shared C# build orchestration layer with Bullseye.
-Both GitHub Actions and Gitea Actions call the same entrypoint:
+This project uses a shared C# script orchestration layer with Bullseye.
+Both GitHub Actions and Gitea Actions call the same launcher entrypoint:
 
 ```bash
-dotnet run --project build -- ci --push true --image <registry/image>
+./build.sh ci --push true --image <registry/image>
 ```
+
+The launcher scripts are responsible for:
+
+- checking whether `dotnet` is already available,
+- installing a project-local SDK into `.dotnet/` with the official `dotnet-install` scripts when needed,
+- exporting `DOTNET_ROOT` and updating `PATH` for the current process,
+- running `dotnet tool restore`,
+- forwarding all arguments to `build.csx`.
 
 ## Target Graph
 
@@ -31,6 +39,15 @@ Dependency flow:
 - Buildx runs with `--sbom=true` and `--provenance=true`.
 - Trivy scan blocks on `HIGH` and `CRITICAL` vulnerabilities.
 
+## Local Bootstrap
+
+- Project-local SDK install directory: `.dotnet/`
+- Tool manifest: `.config/dotnet-tools.json`
+- Official install scripts:
+	- `https://dot.net/v1/dotnet-install.sh`
+	- `https://dot.net/v1/dotnet-install.ps1`
+- `.dotnet/` must stay excluded from both git and the Docker build context.
+
 ## GitHub Actions
 
 Workflow file: `.github/workflows/container.yml`
@@ -54,4 +71,4 @@ Required secrets:
 - `REGISTRY_TOKEN`
 - Optional: `REGISTRY_HOST` if publishing somewhere else later.
 
-The workflow mirrors the same Bullseye entrypoint and relies on compatible runners with Docker, Buildx, and .NET support.
+The workflow mirrors the same script entrypoint and relies on compatible runners with Docker, Buildx, and .NET support.

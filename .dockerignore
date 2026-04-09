@@ -6,6 +6,7 @@ bin
 obj
 build/bin
 build/obj
+.dotnet
 *.user
 *.suo
 *.swp

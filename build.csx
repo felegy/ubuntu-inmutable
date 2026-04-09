@@ -1,21 +1,22 @@
-using Build;
+#r "nuget: Bullseye, 3.8.0"
+#r "nuget: SimpleExec, 12.0.0"
+
+using System.Diagnostics;
 using Bullseye;
 using SimpleExec;
 using static Bullseye.Targets;
-using System.Diagnostics;
 
-var cliArgs = args.ToList();
+var cliArgs = Args.ToList();
 var push = ReadBoolOption(cliArgs, "--push", defaultValue: string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase));
 var imageName = ReadStringOption(cliArgs, "--image", defaultValue: ResolveDefaultImageName());
 var gitSha = ResolveGitSha();
+var dotnetCommand = ResolveDotnetCommand();
 
-var context = new BuildContext
-{
-    ImageName = imageName,
-    Push = push,
-    GitSha = gitSha,
-    CreatedIso = DateTimeOffset.UtcNow.ToString("O")
-};
+var context = new BuildContext(
+    imageName,
+    push,
+    gitSha,
+    DateTimeOffset.UtcNow.ToString("O"));
 
 Target("print-context", () =>
 {
@@ -27,12 +28,12 @@ Target("print-context", () =>
 
 Target("restore", () =>
 {
-    Command.Run("dotnet", "restore build/build.csproj");
+    Command.Run(dotnetCommand, "tool restore");
 });
 
 Target("verify-tools", () =>
 {
-    EnsureTool("docker", "Docker CLI is required");
+    EnsureTool("docker", "Docker CLI is required.");
     Command.Run("docker", "buildx version");
 });
 
@@ -58,8 +59,7 @@ Target("container-build", ["restore", "verify-tools", "print-context"], () =>
 
 Target("scan", ["container-build"], () =>
 {
-    var trivyExists = ToolExists("trivy");
-    if (!trivyExists)
+    if (!ToolExists("trivy"))
     {
         if (IsCi())
         {
@@ -72,8 +72,7 @@ Target("scan", ["container-build"], () =>
 
     foreach (var tag in context.ComputeTags())
     {
-        var imageRef = $"{context.ImageName}:{tag}";
-        Command.Run("trivy", $"image --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed {imageRef}");
+        Command.Run("trivy", $"image --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed {context.ImageName}:{tag}");
     }
 });
 
@@ -187,11 +186,24 @@ static string ResolveGitSha()
     }
 }
 
+static string ResolveDotnetCommand()
+{
+    var envValue = Environment.GetEnvironmentVariable("DOTNET_EXE");
+    if (!string.IsNullOrWhiteSpace(envValue))
+    {
+        return envValue;
+    }
+
+    return "dotnet";
+}
+
 static bool ToolExists(string tool)
 {
+    var probeTool = OperatingSystem.IsWindows() ? "where" : "which";
+
     try
     {
-        Command.Run("which", tool, noEcho: true);
+        Command.Run(probeTool, tool, noEcho: true);
         return true;
     }
     catch
@@ -212,4 +224,24 @@ static bool IsCi()
 {
     var value = Environment.GetEnvironmentVariable("CI");
     return string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+}
+
+sealed class BuildContext(string imageName, bool push, string gitSha, string createdIso)
+{
+    public string ImageName { get; } = imageName;
+    public bool Push { get; } = push;
+    public string GitSha { get; } = gitSha;
+    public string CreatedIso { get; } = createdIso;
+
+    public string ShortSha => GitSha[..Math.Min(7, GitSha.Length)];
+
+    public IReadOnlyList<string> ComputeTags()
+    {
+        if (!Push)
+        {
+            return ["dev"];
+        }
+
+        return ["latest", $"sha-{ShortSha}"];
+    }
 }

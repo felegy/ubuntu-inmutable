@@ -37,5 +37,5 @@ jobs:
                   sudo apt-get update
                   sudo apt-get install -y trivy
 
-            - name: Run Bullseye CI
-              run: dotnet run --project build -- ci --push true --image "$IMAGE_NAME"
+            - name: Run Scripted CI
+              run: ./build.sh ci --push true --image "$IMAGE_NAME"
