@@ -16,6 +16,16 @@ jobs:
         env:
             CI: "true"
             IMAGE_NAME: ghcr.io/${{ github.repository }}
+            BASE_IMAGE: ubuntu:24.04
+            KAIROS_INIT_VERSION: 0.7.0
+            KAIROS_DEFAULT_USER: kairos
+            KAIROS_VARIANT: core
+            KAIROS_MODEL: generic
+            KAIROS_TRUSTED_BOOT: "false"
+            KAIROS_VERSION: 0.3.1
+            KUBERNETES_DISTRO: ""
+            KUBERNETES_VERSION: ""
+            KAIROS_DEBS: open-vm-tools
         steps:
             - name: Checkout
               uses: actions/checkout@v4
@@ -45,4 +55,4 @@ jobs:
                   sudo apt-get install -y trivy
 
             - name: Run Scripted CI
-              run: ./build.sh ci --push true --image "$IMAGE_NAME"
+              run: ./build.sh ci --push true

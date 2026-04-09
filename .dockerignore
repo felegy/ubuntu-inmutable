@@ -2,6 +2,7 @@
 .gitignore
 .github
 .gitea
+**/.gitkeep
 bin
 obj
 build/bin
