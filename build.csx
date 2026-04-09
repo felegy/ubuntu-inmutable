@@ -1,16 +1,37 @@
 #r "nuget: Bullseye, 3.8.0"
 #r "nuget: SimpleExec, 12.0.0"
+#r "nuget: System.CommandLine, 2.0.5"
+
+#nullable enable
 
 using System.Diagnostics;
 using Bullseye;
 using SimpleExec;
+using SC = System.CommandLine;
 using static Bullseye.Targets;
 
-// Parse the command-line once and keep a mutable copy so option helpers
-// can consume flags before Bullseye receives the remaining target args.
-var cliArgs = Args.ToList();
-var push = ReadBoolOption(cliArgs, "--push", defaultValue: string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase));
-var imageName = ReadStringOption(cliArgs, "--image", defaultValue: ResolveDefaultImageName());
+// Define typed command-line options using System.CommandLine for validation and error handling.
+var pushOption = new SC.Option<bool?>("--push")
+{
+    Description = "Push image to registry"
+};
+
+var imageOption = new SC.Option<string?>("--image")
+{
+    Description = "Image name (default: ghcr.io/{repo})"
+};
+
+var root = new SC.RootCommand("Bullseye build orchestrator for ubuntu-inmutable");
+root.Options.Add(pushOption);
+root.Options.Add(imageOption);
+root.TreatUnmatchedTokensAsErrors = false;
+
+// Parse arguments; unmatched tokens (targets, Bullseye flags) pass through to Bullseye.
+var parseResult = root.Parse(Args.ToArray());
+
+// Extract typed option values with appropriate fallbacks.
+var push = parseResult.GetValue(pushOption) ?? IsCi();
+var imageName = parseResult.GetValue(imageOption) ?? ResolveDefaultImageName();
 var gitSha = ResolveGitSha();
 var dotnetCommand = ResolveDotnetCommand();
 
@@ -103,48 +124,8 @@ Target("publish", ["scan"], () =>
 Target("ci", ["publish"]);
 Target("default", ["ci"]);
 
-await RunTargetsAndExitAsync(cliArgs.ToArray());
-
-// Read a bool option while removing the consumed tokens from the mutable arg list.
-static bool ReadBoolOption(List<string> cliArgs, string optionName, bool defaultValue)
-{
-    var index = cliArgs.IndexOf(optionName);
-    if (index < 0)
-    {
-        return defaultValue;
-    }
-
-    if (index == cliArgs.Count - 1 || cliArgs[index + 1].StartsWith("--", StringComparison.Ordinal))
-    {
-        cliArgs.RemoveAt(index);
-        return true;
-    }
-
-    var value = cliArgs[index + 1];
-    cliArgs.RemoveAt(index + 1);
-    cliArgs.RemoveAt(index);
-    return value.Equals("true", StringComparison.OrdinalIgnoreCase) || value == "1";
-}
-
-// Read a string option while preserving Bullseye target args that remain.
-static string ReadStringOption(List<string> cliArgs, string optionName, string defaultValue)
-{
-    var index = cliArgs.IndexOf(optionName);
-    if (index < 0)
-    {
-        return defaultValue;
-    }
-
-    if (index == cliArgs.Count - 1)
-    {
-        throw new ArgumentException($"Missing value for {optionName}");
-    }
-
-    var value = cliArgs[index + 1];
-    cliArgs.RemoveAt(index + 1);
-    cliArgs.RemoveAt(index);
-    return value;
-}
+// Pass unmatched tokens (target names, Bullseye flags) to Bullseye's orchestrator.
+await RunTargetsAndExitAsync(parseResult.UnmatchedTokens.ToArray());
 
 // Prefer CI-provided repository metadata and fall back to a predictable local name.
 static string ResolveDefaultImageName()
