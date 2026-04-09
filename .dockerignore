@@ -1,0 +1,14 @@
+.git
+.gitignore
+.github
+.gitea
+bin
+obj
+build/bin
+build/obj
+*.user
+*.suo
+*.swp
+*.tmp
+README.md
+docs

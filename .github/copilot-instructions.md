@@ -31,3 +31,15 @@ Examples:
 - `~ REV: rewrite CI scaffold prompt`
 
 Do not create commit titles that do not follow this format.
+
+## Branch Naming Convention
+
+Use these branch prefixes:
+- `feature/` for new features and larger planned work
+- `fix/` for bug fixes and corrections
+
+Examples:
+- `feature/container-build-system`
+- `fix/workflow-permission-issue`
+
+Do not create work branches without one of these prefixes.
