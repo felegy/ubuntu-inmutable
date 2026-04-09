@@ -6,18 +6,23 @@ using Bullseye;
 using SimpleExec;
 using static Bullseye.Targets;
 
+// Parse the command-line once and keep a mutable copy so option helpers
+// can consume flags before Bullseye receives the remaining target args.
 var cliArgs = Args.ToList();
 var push = ReadBoolOption(cliArgs, "--push", defaultValue: string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase));
 var imageName = ReadStringOption(cliArgs, "--image", defaultValue: ResolveDefaultImageName());
 var gitSha = ResolveGitSha();
 var dotnetCommand = ResolveDotnetCommand();
 
+// Build context holds the values reused by multiple targets so tag generation,
+// timestamps, and image naming stay consistent across the run.
 var context = new BuildContext(
     imageName,
     push,
     gitSha,
     DateTimeOffset.UtcNow.ToString("O"));
 
+// Print the resolved execution context for local debugging and CI logs.
 Target("print-context", () =>
 {
     Console.WriteLine($"Image: {context.ImageName}");
@@ -26,23 +31,29 @@ Target("print-context", () =>
     Console.WriteLine($"Tags: {string.Join(",", context.ComputeTags())}");
 });
 
+// Restore local tools from the repository tool manifest so dotnet-script and
+// any future tools are available in a deterministic way.
 Target("restore", () =>
 {
     Command.Run(dotnetCommand, "tool restore");
 });
 
+// Fail fast if the container toolchain is missing before longer-running steps.
 Target("verify-tools", () =>
 {
     EnsureTool("docker", "Docker CLI is required.");
     Command.Run("docker", "buildx version");
 });
 
+// Build the image once with all requested tags and supply-chain metadata.
 Target("container-build", ["restore", "verify-tools", "print-context"], () =>
 {
     var tags = context.ComputeTags();
     var tagArguments = string.Join(" ", tags.Select(tag => $"--tag {context.ImageName}:{tag}"));
     var outputMode = context.Push ? "--push" : "--load";
 
+    // The build command keeps SBOM and provenance enabled so local and CI
+    // builds follow the same artifact policy.
     var buildArgs = string.Join(" ",
         "buildx build",
         "--file Containerfile",
@@ -57,10 +68,12 @@ Target("container-build", ["restore", "verify-tools", "print-context"], () =>
     Command.Run("docker", buildArgs);
 });
 
+// Scan every produced tag with Trivy and block CI on high-severity findings.
 Target("scan", ["container-build"], () =>
 {
     if (!ToolExists("trivy"))
     {
+        // CI must fail if the scanner is unavailable; local runs can skip it.
         if (IsCi())
         {
             throw new InvalidOperationException("trivy is required in CI for security scanning.");
@@ -76,6 +89,8 @@ Target("scan", ["container-build"], () =>
     }
 });
 
+// Publish is represented by the buildx --push mode; keep this target so the
+// graph stays expressive even when non-push runs become a no-op here.
 Target("publish", ["scan"], () =>
 {
     if (!context.Push)
@@ -84,11 +99,13 @@ Target("publish", ["scan"], () =>
     }
 });
 
+// CI is the public entrypoint used by workflows and local launcher scripts.
 Target("ci", ["publish"]);
 Target("default", ["ci"]);
 
 await RunTargetsAndExitAsync(cliArgs.ToArray());
 
+// Read a bool option while removing the consumed tokens from the mutable arg list.
 static bool ReadBoolOption(List<string> cliArgs, string optionName, bool defaultValue)
 {
     var index = cliArgs.IndexOf(optionName);
@@ -109,6 +126,7 @@ static bool ReadBoolOption(List<string> cliArgs, string optionName, bool default
     return value.Equals("true", StringComparison.OrdinalIgnoreCase) || value == "1";
 }
 
+// Read a string option while preserving Bullseye target args that remain.
 static string ReadStringOption(List<string> cliArgs, string optionName, string defaultValue)
 {
     var index = cliArgs.IndexOf(optionName);
@@ -128,6 +146,7 @@ static string ReadStringOption(List<string> cliArgs, string optionName, string d
     return value;
 }
 
+// Prefer CI-provided repository metadata and fall back to a predictable local name.
 static string ResolveDefaultImageName()
 {
     var repo = Environment.GetEnvironmentVariable("GITHUB_REPOSITORY")
@@ -142,6 +161,7 @@ static string ResolveDefaultImageName()
     return "ghcr.io/owner/ubuntu-inmutable";
 }
 
+// Prefer CI commit metadata and fall back to git for local runs.
 static string ResolveGitSha()
 {
     var envSha = Environment.GetEnvironmentVariable("GITHUB_SHA")
@@ -186,6 +206,7 @@ static string ResolveGitSha()
     }
 }
 
+// Launcher scripts can force a project-local dotnet binary via DOTNET_EXE.
 static string ResolveDotnetCommand()
 {
     var envValue = Environment.GetEnvironmentVariable("DOTNET_EXE");
@@ -197,6 +218,7 @@ static string ResolveDotnetCommand()
     return "dotnet";
 }
 
+// Use a platform-appropriate lookup command so this helper works in scripts and CI.
 static bool ToolExists(string tool)
 {
     var probeTool = OperatingSystem.IsWindows() ? "where" : "which";
@@ -212,6 +234,7 @@ static bool ToolExists(string tool)
     }
 }
 
+// Centralize the failure message when a required external tool is missing.
 static void EnsureTool(string tool, string errorMessage)
 {
     if (!ToolExists(tool))
@@ -220,12 +243,14 @@ static void EnsureTool(string tool, string errorMessage)
     }
 }
 
+// CI-specific behavior is controlled by the conventional CI environment variable.
 static bool IsCi()
 {
     var value = Environment.GetEnvironmentVariable("CI");
     return string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
 }
 
+// This immutable context keeps tag and metadata logic in one place.
 sealed class BuildContext(string imageName, bool push, string gitSha, string createdIso)
 {
     public string ImageName { get; } = imageName;
@@ -233,8 +258,10 @@ sealed class BuildContext(string imageName, bool push, string gitSha, string cre
     public string GitSha { get; } = gitSha;
     public string CreatedIso { get; } = createdIso;
 
+    // Short SHA is used for human-readable image tags.
     public string ShortSha => GitSha[..Math.Min(7, GitSha.Length)];
 
+    // Local runs produce a single dev tag; CI push runs publish stable tags.
     public IReadOnlyList<string> ComputeTags()
     {
         if (!Push)
