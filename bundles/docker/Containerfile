@@ -1,0 +1,33 @@
+FROM ubuntu:24.04 AS builder
+ARG TARGETARCH
+ENV DOTNET_VERSION=10.0.0
+
+# Install curl, wget, gpg for downloads and key verification
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl wget gnupg ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# Add Docker official GPG key and repository
+RUN install -m 0755 -d /etc/apt/keyrings && \
+    wget -O /tmp/docker.gpg https://download.docker.com/linux/ubuntu/gpg && \
+    gpg --dearmor -o /etc/apt/keyrings/docker.gpg /tmp/docker.gpg && \
+    chmod a+r /etc/apt/keyrings/docker.gpg && \
+    echo "deb [arch=${TARGETARCH} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu jammy stable" > /etc/apt/sources.list.d/docker.list
+
+# Download Docker packages
+RUN mkdir -p /packages && \
+    apt-get update && \
+    apt-get install -y --download-only -o Dir::Cache::Archives=/packages \
+    docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# Download dotnet runtime
+RUN mkdir -p /dotnet && cd /dotnet && \
+    wget https://dotnetcli.blob.core.windows.net/dotnet/Runtime/${DOTNET_VERSION}/dotnet-runtime-${DOTNET_VERSION}-linux-${TARGETARCH}.tar.gz && \
+    tar -xzf dotnet-runtime-${DOTNET_VERSION}-linux-${TARGETARCH}.tar.gz && \
+    rm -f dotnet-runtime-${DOTNET_VERSION}-linux-${TARGETARCH}.tar.gz
+
+FROM scratch
+COPY ./run.sh /
+COPY ./run.csx /
+COPY --from=builder /packages/ ./deb/
+COPY --from=builder /dotnet /dotnet
