@@ -43,3 +43,13 @@ Examples:
 - `fix/workflow-permission-issue`
 
 Do not create work branches without one of these prefixes.
+
+## EditorConfig Compliance
+
+Formatting must not only pass `editorconfig-checker`; it must follow the numeric values in `.editorconfig` exactly.
+
+Rules:
+- Always use the exact `indent_size` per file type (not just a multiple).
+- For YAML (`*.yml`, `*.yaml`), use exactly 2 spaces per indentation level.
+- For Markdown and default file types in this repo, use exactly 4 spaces where indentation is required.
+- Do not use tabs in files configured with `indent_style = space`.
