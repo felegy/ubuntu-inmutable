@@ -102,6 +102,7 @@ var version = ResolveWithEnvFallback(parseResult.GetValue(versionOption), "KAIRO
 var kubernetesDistro = ResolveWithEnvFallback(parseResult.GetValue(kubernetesDistroOption), "KUBERNETES_DISTRO", "");
 var kubernetesVersion = ResolveWithEnvFallback(parseResult.GetValue(kubernetesVersionOption), "KUBERNETES_VERSION", "");
 var debs = ResolveWithEnvFallback(parseResult.GetValue(debsOption), "KAIROS_DEBS", "open-vm-tools");
+var imageExtraTag = ResolveWithEnvFallback(null, "IMAGE_EXTRA_TAG", "");
 var gitSha = ResolveGitSha();
 var dotnetCommand = ResolveDotnetCommand();
 
@@ -121,7 +122,8 @@ var context = new BuildContext(
     version,
     kubernetesDistro,
     kubernetesVersion,
-    debs);
+    debs,
+    imageExtraTag);
 
 // Print the resolved execution context for local debugging and CI logs.
 Target("print-context", () =>
@@ -140,6 +142,7 @@ Target("print-context", () =>
     Console.WriteLine($"KubernetesDistro: {(string.IsNullOrEmpty(context.KubernetesDistro) ? "(none)" : context.KubernetesDistro)}");
     Console.WriteLine($"KubernetesVersion: {(string.IsNullOrEmpty(context.KubernetesVersion) ? "(none)" : context.KubernetesVersion)}");
     Console.WriteLine($"Debs: {context.Debs}");
+    Console.WriteLine($"ImageExtraTag: {(string.IsNullOrEmpty(context.ImageExtraTag) ? "(none)" : context.ImageExtraTag)}");
 
     if (string.IsNullOrEmpty(context.Version))
     {
@@ -385,7 +388,8 @@ sealed class BuildContext(
     string version,
     string kubernetesDistro,
     string kubernetesVersion,
-    string debs)
+    string debs,
+    string imageExtraTag)
 {
     public string ImageName { get; } = imageName;
     public bool Push { get; } = push;
@@ -401,6 +405,7 @@ sealed class BuildContext(
     public string KubernetesDistro { get; } = kubernetesDistro;
     public string KubernetesVersion { get; } = kubernetesVersion;
     public string Debs { get; } = debs;
+    public string ImageExtraTag { get; } = imageExtraTag;
 
     // Short SHA is used for human-readable image tags.
     public string ShortSha => GitSha[..Math.Min(7, GitSha.Length)];
@@ -413,6 +418,12 @@ sealed class BuildContext(
             return ["dev"];
         }
 
-        return ["latest", $"sha-{ShortSha}"];
+        var tags = new List<string> { "latest", $"sha-{ShortSha}" };
+        if (!string.IsNullOrWhiteSpace(ImageExtraTag))
+        {
+            tags.Add(ImageExtraTag);
+        }
+
+        return tags;
     }
 }
