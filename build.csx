@@ -71,6 +71,11 @@ var debsOption = new SC.Option<string?>("--debs")
     Description = "Space-separated extra APT packages (default: open-vm-tools)"
 };
 
+var skipTrivyIgnoreOption = new SC.Option<bool?>("--skip-trivy-ignore")
+{
+    Description = "Skip .trivyignore file during Trivy scan (default: false)"
+};
+
 var root = new SC.RootCommand("Bullseye build orchestrator for ubuntu-inmutable");
 root.Options.Add(pushOption);
 root.Options.Add(imageOption);
@@ -84,6 +89,7 @@ root.Options.Add(versionOption);
 root.Options.Add(kubernetesDistroOption);
 root.Options.Add(kubernetesVersionOption);
 root.Options.Add(debsOption);
+root.Options.Add(skipTrivyIgnoreOption);
 root.TreatUnmatchedTokensAsErrors = false;
 
 // Parse arguments; unmatched tokens (targets, Bullseye flags) pass through to Bullseye.
@@ -103,6 +109,7 @@ var kubernetesDistro = ResolveWithEnvFallback(parseResult.GetValue(kubernetesDis
 var kubernetesVersion = ResolveWithEnvFallback(parseResult.GetValue(kubernetesVersionOption), "KUBERNETES_VERSION", "");
 var debs = ResolveWithEnvFallback(parseResult.GetValue(debsOption), "KAIROS_DEBS", "open-vm-tools");
 var imageExtraTag = ResolveWithEnvFallback(null, "IMAGE_EXTRA_TAG", "");
+var skipTrivyIgnore = ResolveBoolWithEnvFallback(parseResult.GetValue(skipTrivyIgnoreOption), "SKIP_TRIVY_IGNORE", false);
 var gitSha = ResolveGitSha();
 var dotnetCommand = ResolveDotnetCommand();
 
@@ -123,7 +130,8 @@ var context = new BuildContext(
     kubernetesDistro,
     kubernetesVersion,
     debs,
-    imageExtraTag);
+    imageExtraTag,
+    skipTrivyIgnore);
 
 // Print the resolved execution context for local debugging and CI logs.
 Target("print-context", () =>
@@ -143,6 +151,7 @@ Target("print-context", () =>
     Console.WriteLine($"KubernetesVersion: {(string.IsNullOrEmpty(context.KubernetesVersion) ? "(none)" : context.KubernetesVersion)}");
     Console.WriteLine($"Debs: {context.Debs}");
     Console.WriteLine($"ImageExtraTag: {(string.IsNullOrEmpty(context.ImageExtraTag) ? "(none)" : context.ImageExtraTag)}");
+    Console.WriteLine($"SkipTrivyIgnore: {context.SkipTrivyIgnore}");
 
     if (string.IsNullOrEmpty(context.Version))
     {
@@ -225,7 +234,13 @@ Target("scan", ["container-build"], () =>
 
     foreach (var tag in context.ComputeTags())
     {
-        Command.Run("trivy", $"image --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed --ignorefile .trivyignore {context.ImageName}:{tag}");
+        var trivyArgs = $"image --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed";
+        if (!context.SkipTrivyIgnore)
+        {
+            trivyArgs += " --ignorefile .trivyignore";
+        }
+        trivyArgs += $" {context.ImageName}:{tag}";
+        Command.Run("trivy", trivyArgs);
     }
 });
 
@@ -391,7 +406,8 @@ sealed class BuildContext(
     string kubernetesDistro,
     string kubernetesVersion,
     string debs,
-    string imageExtraTag)
+    string imageExtraTag,
+    bool skipTrivyIgnore)
 {
     public string ImageName { get; } = imageName;
     public bool Push { get; } = push;
@@ -408,6 +424,7 @@ sealed class BuildContext(
     public string KubernetesVersion { get; } = kubernetesVersion;
     public string Debs { get; } = debs;
     public string ImageExtraTag { get; } = imageExtraTag;
+    public bool SkipTrivyIgnore { get; } = skipTrivyIgnore;
 
     // Short SHA is used for human-readable image tags.
     public string ShortSha => GitSha[..Math.Min(7, GitSha.Length)];
