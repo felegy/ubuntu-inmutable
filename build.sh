@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eu
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT="$SCRIPT_DIR"
 DOTNET_INSTALL_DIR="$REPO_ROOT/.dotnet"
 DOTNET_EXE=""
