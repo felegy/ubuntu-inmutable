@@ -44,8 +44,8 @@ Dependency flow:
 - Project-local SDK install directory: `.dotnet/`
 - Tool manifest: `.config/dotnet-tools.json`
 - Official install scripts:
-    - `https://dot.net/v1/dotnet-install.sh`
-    - `https://dot.net/v1/dotnet-install.ps1`
+	- `https://dot.net/v1/dotnet-install.sh`
+	- `https://dot.net/v1/dotnet-install.ps1`
 - `.dotnet/` must stay excluded from both git and the Docker build context.
 
 ## GitHub Actions
