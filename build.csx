@@ -172,6 +172,8 @@ Target("container-build", ["restore", "verify-tools", "print-context"], () =>
     var tags = context.ComputeTags();
     var tagArguments = string.Join(" ", tags.Select(tag => $"--tag {context.ImageName}:{tag}"));
     var outputMode = context.Push ? "--push" : "--load";
+    var provenanceMode = context.Push ? "true" : "false";
+    var sbomMode = context.Push ? "true" : "false";
 
     // The build command keeps SBOM and provenance enabled so local and CI
     // builds follow the same artifact policy.
@@ -179,8 +181,8 @@ Target("container-build", ["restore", "verify-tools", "print-context"], () =>
     {
         "buildx build",
         "--file Containerfile",
-        "--provenance=true",
-        "--sbom=true",
+        $"--provenance={provenanceMode}",
+        $"--sbom={sbomMode}",
         $"--build-arg BASE_IMAGE={context.BaseImage}",
         $"--build-arg KAIROS_INIT_VERSION={context.KairosInitVersion}",
         $"--build-arg DEFAULT_USER={context.DefaultUser}",
