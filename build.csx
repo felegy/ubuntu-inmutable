@@ -223,7 +223,7 @@ Target("scan", ["container-build"], () =>
 
     foreach (var tag in context.ComputeTags())
     {
-        Command.Run("trivy", $"image --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed {context.ImageName}:{tag}");
+        Command.Run("trivy", $"image --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed --ignorefile .trivyignore {context.ImageName}:{tag}");
     }
 });
 

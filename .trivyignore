@@ -1,0 +1,3 @@
+# Temporary upstream ignore for Go stdlib net/url issue present in upstream k3s/kairos binaries.
+# Remove once the consumed upstream images/binaries are rebuilt with a fixed Go release.
+CVE-2026-25679
