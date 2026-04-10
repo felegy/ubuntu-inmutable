@@ -1,0 +1,4 @@
+#cloud-config
+
+# enable debug logging
+debug: true

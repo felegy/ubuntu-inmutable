@@ -154,6 +154,9 @@ The build system supports fine-grained configuration via CLI flags:
 - `--skip-trivy-ignore false`
     Use `.trivyignore` file to suppress known upstream vulnerabilities (default: `false` = use ignore file)
 
+- `--verbosity normal`
+    Build output verbosity: `quiet`, `minimal`, `normal`, `detailed`, `diagnostic` (default: `normal`)
+
 ### Build Targets
 
 #### Full CI Flow
@@ -182,9 +185,12 @@ export KAIROS_VERSION=0.3.1
 export KUBERNETES_DISTRO=k3s
 export KUBERNETES_VERSION=v1.29.1+k3s1
 export SKIP_TRIVY_IGNORE=true
+export BUILD_VERBOSITY=normal
 
 ./build.sh ci --push false
 ```
+
+In CI, `KAIROS_VERSION` is resolved from the latest repository tag (for example `v0.3.1` becomes `0.3.1`) with fallback `0.1` when no tags exist.
 
 #### Supported Environment Variables
 
@@ -201,6 +207,8 @@ export SKIP_TRIVY_IGNORE=true
 | `KUBERNETES_DISTRO` | `--kubernetes-distro` | (none) |
 | `KUBERNETES_VERSION` | `--kubernetes-version` | (none) |
 | `IMAGE_EXTRA_TAG` | `--image-extra-tag` | (none) |
+| `BUILD_VERBOSITY` | `--verbosity` | `normal` |
+| `IS_PRIMARY_TAG_TARGET` | (CI matrix env) | `false` |
 | `SKIP_TRIVY_IGNORE` | `--skip-trivy-ignore` | `false` |
 
 ### Direct Docker Build
@@ -224,17 +232,27 @@ docker build \
 
 The workflow automatically:
 
-1. **Resolves k3s versions** – Fetches latest stable k3s releases via GitHub API
-2. **Generates matrix** – 1 baseline + 3 k3s variants with minor-version tags
-3. **Validates code** – EditorConfig compliance, ShellCheck linting
-4. **Builds containers** – Parallel multi-platform builds
-5. **Scans security** – Trivy HIGH/CRITICAL vulnerability detection
-6. **Attests supply chain** – SBOM and provenance generation
-7. **Publishes** – Push to ghcr.io with immutable image attestation
+1. **Validates code** – EditorConfig compliance and ShellCheck linting
+2. **Resolves `KAIROS_VERSION`** – Reads latest repository git tag and normalizes version
+3. **Resolves k3s versions** – Fetches latest stable k3s releases via GitHub API
+4. **Generates matrix** – 1 `iso` baseline + 3 k3s variants with minor-version tags
+5. **Marks primary matrix entry** – Newest k3s entry gets `latest` and `sha-<short>` ownership
+6. **Builds containers** – Parallel builds using Bullseye orchestration
+7. **Scans security** – Trivy HIGH/CRITICAL vulnerability detection
+8. **Attests supply chain** – SBOM and provenance generation
+9. **Publishes** – Push to ghcr.io with deterministic tagging
+
+Tag behavior in CI push builds:
+- `latest` and `sha-<short>` are published only by the newest k3s matrix entry.
+- Matrix-specific tags (`iso`, `k3s-vX.Y`) are published by their corresponding entries.
+
+Release behavior:
+- On `release.published`, GitHub Actions builds an offline ISO from `ghcr.io/<repo>:iso` and uploads ISO + checksum artifacts to the release assets.
 
 Workflow triggers:
-- Push to `main` or `feature/*` branches
+- Push to `main`
 - Manual dispatch via `workflow_dispatch`
+- `release.published` for ISO artifact generation and upload
 
 ### Vulnerability Management
 
