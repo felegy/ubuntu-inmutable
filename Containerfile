@@ -43,7 +43,7 @@ RUN --mount=type=bind,from=kairos-init,src=/kairos-init,dst=/kairos-init \
     fi; \
     eval /kairos-init -l "${KAIROS_INIT_LOG_LEVEL}" -s install -m "${MODEL}" -v "${VARIANT}" -t "${TRUSTED_BOOT}" --version "${VERSION}" ${K8S_FLAG} ${K8S_VERSION_FLAG}; \
     eval /kairos-init -l "${KAIROS_INIT_LOG_LEVEL}" -s init -m "${MODEL}" -v "${VARIANT}" -t "${TRUSTED_BOOT}" --version "${VERSION}"  ${K8S_FLAG} ${K8S_VERSION_FLAG}; \
-    eval /kairos-init -l "${KAIROS_INIT_LOG_LEVEL}" validate -t "${TRUSTED_BOOT}"; \
+    eval /kairos-init validate -t "${TRUSTED_BOOT}"; \
     locale-gen en_US.UTF-8; \
     update-locale LANG=en_US.UTF-8; \
     echo "LANG=en_US.UTF-8" > /etc/default/locale;
