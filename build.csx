@@ -76,6 +76,11 @@ var skipTrivyIgnoreOption = new SC.Option<bool?>("--skip-trivy-ignore")
     Description = "Skip .trivyignore file during Trivy scan (default: false)"
 };
 
+var verbosityOption = new SC.Option<string?>("--verbosity")
+{
+    Description = "Output verbosity: quiet|minimal|normal|detailed|diagnostic (default: normal)"
+};
+
 var root = new SC.RootCommand("Bullseye build orchestrator for ubuntu-inmutable");
 root.Options.Add(pushOption);
 root.Options.Add(imageOption);
@@ -90,6 +95,7 @@ root.Options.Add(kubernetesDistroOption);
 root.Options.Add(kubernetesVersionOption);
 root.Options.Add(debsOption);
 root.Options.Add(skipTrivyIgnoreOption);
+root.Options.Add(verbosityOption);
 root.TreatUnmatchedTokensAsErrors = false;
 
 // Parse arguments; unmatched tokens (targets, Bullseye flags) pass through to Bullseye.
@@ -104,12 +110,14 @@ var defaultUser = ResolveWithEnvFallback(parseResult.GetValue(defaultUserOption)
 var variant = ResolveWithEnvFallback(parseResult.GetValue(variantOption), "KAIROS_VARIANT", "core");
 var model = ResolveWithEnvFallback(parseResult.GetValue(modelOption), "KAIROS_MODEL", "generic");
 var trustedBoot = ResolveBoolWithEnvFallback(parseResult.GetValue(trustedBootOption), "KAIROS_TRUSTED_BOOT", false);
-var version = ResolveWithEnvFallback(parseResult.GetValue(versionOption), "KAIROS_VERSION", "");
+var version = ResolveKairosVersion(parseResult.GetValue(versionOption));
 var kubernetesDistro = ResolveWithEnvFallback(parseResult.GetValue(kubernetesDistroOption), "KUBERNETES_DISTRO", "");
 var kubernetesVersion = ResolveWithEnvFallback(parseResult.GetValue(kubernetesVersionOption), "KUBERNETES_VERSION", "");
 var debs = ResolveWithEnvFallback(parseResult.GetValue(debsOption), "KAIROS_DEBS", "open-vm-tools");
 var imageExtraTag = ResolveWithEnvFallback(null, "IMAGE_EXTRA_TAG", "");
 var skipTrivyIgnore = ResolveBoolWithEnvFallback(parseResult.GetValue(skipTrivyIgnoreOption), "SKIP_TRIVY_IGNORE", false);
+var verbosity = ResolveVerbosity(parseResult.GetValue(verbosityOption));
+var isPrimaryTagTarget = ResolveBoolWithEnvFallback(null, "IS_PRIMARY_TAG_TARGET", false);
 var gitSha = ResolveGitSha();
 var dotnetCommand = ResolveDotnetCommand();
 
@@ -131,15 +139,31 @@ var context = new BuildContext(
     kubernetesVersion,
     debs,
     imageExtraTag,
-    skipTrivyIgnore);
+    skipTrivyIgnore,
+    verbosity,
+    isPrimaryTagTarget);
 
 // Print the resolved execution context for local debugging and CI logs.
 Target("print-context", () =>
 {
+    if (string.IsNullOrEmpty(context.Version))
+    {
+        if (IsCi())
+            throw new InvalidOperationException("--version / KAIROS_VERSION is required in CI.");
+        Console.WriteLine("Warning: VERSION is empty - kairos-init will fail during container-build.");
+    }
+
+    if (context.Verbosity == BuildVerbosity.Quiet)
+    {
+        return;
+    }
+
     Console.WriteLine($"Image: {context.ImageName}");
     Console.WriteLine($"Push: {context.Push}");
     Console.WriteLine($"SHA: {context.GitSha}");
     Console.WriteLine($"Tags: {string.Join(",", context.ComputeTags())}");
+    Console.WriteLine($"Verbosity: {ToDisplayString(context.Verbosity)}");
+    Console.WriteLine($"IsPrimaryTagTarget: {context.IsPrimaryTagTarget}");
     Console.WriteLine($"BaseImage: {context.BaseImage}");
     Console.WriteLine($"KairosInitVersion: {context.KairosInitVersion}");
     Console.WriteLine($"DefaultUser: {context.DefaultUser}");
@@ -152,13 +176,6 @@ Target("print-context", () =>
     Console.WriteLine($"Debs: {context.Debs}");
     Console.WriteLine($"ImageExtraTag: {(string.IsNullOrEmpty(context.ImageExtraTag) ? "(none)" : context.ImageExtraTag)}");
     Console.WriteLine($"SkipTrivyIgnore: {context.SkipTrivyIgnore}");
-
-    if (string.IsNullOrEmpty(context.Version))
-    {
-        if (IsCi())
-            throw new InvalidOperationException("--version / KAIROS_VERSION is required in CI.");
-        Console.WriteLine("Warning: VERSION is empty - kairos-init will fail during container-build.");
-    }
 });
 
 // Restore local tools from the repository tool manifest so dotnet-script and
@@ -172,7 +189,7 @@ Target("restore", () =>
 Target("verify-tools", () =>
 {
     EnsureTool("docker", "Docker CLI is required.");
-    Command.Run("docker", "buildx version");
+    Command.Run("docker", "buildx version", noEcho: context.Verbosity == BuildVerbosity.Quiet);
 });
 
 // Build the image once with all requested tags and supply-chain metadata.
@@ -183,6 +200,7 @@ Target("container-build", ["restore", "verify-tools", "print-context"], () =>
     var outputMode = context.Push ? "--push" : "--load";
     var provenanceMode = context.Push ? "true" : "false";
     var sbomMode = context.Push ? "true" : "false";
+    var progressMode = context.DockerBuildProgressMode;
 
     // The build command keeps SBOM and provenance enabled so local and CI
     // builds follow the same artifact policy.
@@ -190,10 +208,12 @@ Target("container-build", ["restore", "verify-tools", "print-context"], () =>
     {
         "buildx build",
         "--file Containerfile",
+        $"--progress={progressMode}",
         $"--provenance={provenanceMode}",
         $"--sbom={sbomMode}",
         $"--build-arg BASE_IMAGE={context.BaseImage}",
         $"--build-arg KAIROS_INIT_VERSION={context.KairosInitVersion}",
+        $"--build-arg KAIROS_INIT_LOG_LEVEL={context.KairosInitLogLevel}",
         $"--build-arg DEFAULT_USER={context.DefaultUser}",
         $"--build-arg VARIANT={context.Variant}",
         $"--build-arg MODEL={context.Model}",
@@ -214,7 +234,7 @@ Target("container-build", ["restore", "verify-tools", "print-context"], () =>
     buildArgParts.Add(outputMode);
     buildArgParts.Add(".");
 
-    Command.Run("docker", string.Join(" ", buildArgParts));
+    Command.Run("docker", string.Join(" ", buildArgParts), noEcho: context.Verbosity == BuildVerbosity.Quiet);
 });
 
 // Scan every produced tag with Trivy and block CI on high-severity findings.
@@ -235,6 +255,14 @@ Target("scan", ["container-build"], () =>
     foreach (var tag in context.ComputeTags())
     {
         var trivyArgs = $"image --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed";
+        if (context.Verbosity is BuildVerbosity.Quiet or BuildVerbosity.Minimal)
+        {
+            trivyArgs += " --quiet";
+        }
+        if (context.Verbosity == BuildVerbosity.Diagnostic)
+        {
+            trivyArgs += " --debug";
+        }
         if (!context.SkipTrivyIgnore)
         {
             trivyArgs += " --ignorefile .trivyignore";
@@ -371,6 +399,71 @@ static bool IsCi()
     return string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
 }
 
+// Resolve Kairos version from CLI, env, latest git tag, then bootstrap fallback.
+static string ResolveKairosVersion(string? cliValue)
+{
+    if (!string.IsNullOrWhiteSpace(cliValue))
+    {
+        return NormalizeKairosVersion(cliValue);
+    }
+
+    var envValue = Environment.GetEnvironmentVariable("KAIROS_VERSION");
+    if (!string.IsNullOrWhiteSpace(envValue))
+    {
+        return NormalizeKairosVersion(envValue);
+    }
+
+    var latestTag = ResolveLatestGitTag();
+    if (!string.IsNullOrWhiteSpace(latestTag))
+    {
+        return NormalizeKairosVersion(latestTag);
+    }
+
+    return "0.1";
+}
+
+static string NormalizeKairosVersion(string value)
+{
+    return value.Trim().TrimStart('v');
+}
+
+static string ResolveLatestGitTag()
+{
+    try
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "git",
+            Arguments = "tag --sort=-version:refname",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+
+        using var process = Process.Start(startInfo);
+        if (process is null)
+        {
+            return string.Empty;
+        }
+
+        var stdout = process.StandardOutput.ReadToEnd();
+        process.WaitForExit();
+
+        if (process.ExitCode != 0)
+        {
+            return string.Empty;
+        }
+
+        return stdout
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault() ?? string.Empty;
+    }
+    catch
+    {
+        return string.Empty;
+    }
+}
+
 // Resolve a string value from CLI option, then environment variable, then hard-coded default.
 static string ResolveWithEnvFallback(string? cliValue, string envVar, string hardDefault)
 {
@@ -390,6 +483,60 @@ static bool ResolveBoolWithEnvFallback(bool? cliValue, string envVar, bool hardD
     return hardDefault;
 }
 
+// Resolve verbosity from CLI first, then environment, then default.
+static BuildVerbosity ResolveVerbosity(string? cliValue)
+{
+    var value = cliValue;
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        value = Environment.GetEnvironmentVariable("BUILD_VERBOSITY");
+    }
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        value = Environment.GetEnvironmentVariable("VERBOSITY");
+    }
+
+    return BuildVerbosityExtensions.Parse(value);
+}
+
+enum BuildVerbosity
+{
+    Quiet,
+    Minimal,
+    Normal,
+    Detailed,
+    Diagnostic
+}
+
+static class BuildVerbosityExtensions
+{
+    public static BuildVerbosity Parse(string? value)
+    {
+        var normalized = (value ?? "normal").Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "quiet" => BuildVerbosity.Quiet,
+            "minimal" => BuildVerbosity.Minimal,
+            "normal" => BuildVerbosity.Normal,
+            "detailed" => BuildVerbosity.Detailed,
+            "diagnostic" => BuildVerbosity.Diagnostic,
+            _ => throw new InvalidOperationException($"Invalid verbosity '{value}'. Allowed values: quiet|minimal|normal|detailed|diagnostic.")
+        };
+    }
+
+    public static string ToDisplayString(BuildVerbosity verbosity) => verbosity switch
+    {
+        BuildVerbosity.Quiet => "quiet",
+        BuildVerbosity.Minimal => "minimal",
+        BuildVerbosity.Normal => "normal",
+        BuildVerbosity.Detailed => "detailed",
+        BuildVerbosity.Diagnostic => "diagnostic",
+        _ => "normal"
+    };
+}
+
+static string ToDisplayString(BuildVerbosity verbosity) => BuildVerbosityExtensions.ToDisplayString(verbosity);
+
 // This immutable context keeps tag and metadata logic in one place.
 sealed class BuildContext(
     string imageName,
@@ -407,7 +554,9 @@ sealed class BuildContext(
     string kubernetesVersion,
     string debs,
     string imageExtraTag,
-    bool skipTrivyIgnore)
+    bool skipTrivyIgnore,
+    BuildVerbosity verbosity,
+    bool isPrimaryTagTarget)
 {
     public string ImageName { get; } = imageName;
     public bool Push { get; } = push;
@@ -425,6 +574,20 @@ sealed class BuildContext(
     public string Debs { get; } = debs;
     public string ImageExtraTag { get; } = imageExtraTag;
     public bool SkipTrivyIgnore { get; } = skipTrivyIgnore;
+    public BuildVerbosity Verbosity { get; } = verbosity;
+    public bool IsPrimaryTagTarget { get; } = isPrimaryTagTarget;
+
+    public string DockerBuildProgressMode => Verbosity is BuildVerbosity.Detailed or BuildVerbosity.Diagnostic ? "plain" : "auto";
+
+    public string KairosInitLogLevel => Verbosity switch
+    {
+        BuildVerbosity.Quiet => "error",
+        BuildVerbosity.Minimal => "warn",
+        BuildVerbosity.Normal => "info",
+        BuildVerbosity.Detailed => "debug",
+        BuildVerbosity.Diagnostic => "debug",
+        _ => "info"
+    };
 
     // Short SHA is used for human-readable image tags.
     public string ShortSha => GitSha[..Math.Min(7, GitSha.Length)];
@@ -437,10 +600,21 @@ sealed class BuildContext(
             return ["dev"];
         }
 
-        var tags = new List<string> { "latest", $"sha-{ShortSha}" };
+        var tags = new List<string>();
+        if (IsPrimaryTagTarget)
+        {
+            tags.Add("latest");
+            tags.Add($"sha-{ShortSha}");
+        }
+
         if (!string.IsNullOrWhiteSpace(ImageExtraTag))
         {
             tags.Add(ImageExtraTag);
+        }
+
+        if (tags.Count == 0)
+        {
+            tags.Add($"sha-{ShortSha}");
         }
 
         return tags;

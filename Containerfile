@@ -1,5 +1,6 @@
 ARG BASE_IMAGE=ubuntu:24.04
 ARG KAIROS_INIT_VERSION=0.7.0
+ARG KAIROS_INIT_LOG_LEVEL=debug
 
 FROM quay.io/kairos/kairos-init:v${KAIROS_INIT_VERSION} AS kairos-init
 
@@ -12,6 +13,7 @@ ARG TRUSTED_BOOT=false
 ARG VERSION
 ARG KUBERNETES_DISTRO
 ARG KUBERNETES_VERSION=${VERSION}
+ARG KAIROS_INIT_LOG_LEVEL=debug
 ARG DEBS='open-vm-tools'
 
 RUN apt-get update && apt-get -y --no-install-recommends install \
@@ -39,16 +41,18 @@ RUN --mount=type=bind,from=kairos-init,src=/kairos-init,dst=/kairos-init \
         K8S_FLAG=""; \
         K8S_VERSION_FLAG=""; \
     fi; \
-    eval /kairos-init -l debug -s install -m "${MODEL}" -v "${VARIANT}" -t "${TRUSTED_BOOT}" --version "${VERSION}" ${K8S_FLAG} ${K8S_VERSION_FLAG}; \
-    eval /kairos-init -l debug -s init -m "${MODEL}" -v "${VARIANT}" -t "${TRUSTED_BOOT}" --version "${VERSION}"  ${K8S_FLAG} ${K8S_VERSION_FLAG}; \
-    eval /kairos-init validate -t "${TRUSTED_BOOT}"; \
+    eval /kairos-init -l "${KAIROS_INIT_LOG_LEVEL}" -s install -m "${MODEL}" -v "${VARIANT}" -t "${TRUSTED_BOOT}" --version "${VERSION}" ${K8S_FLAG} ${K8S_VERSION_FLAG}; \
+    eval /kairos-init -l "${KAIROS_INIT_LOG_LEVEL}" -s init -m "${MODEL}" -v "${VARIANT}" -t "${TRUSTED_BOOT}" --version "${VERSION}"  ${K8S_FLAG} ${K8S_VERSION_FLAG}; \
+    eval /kairos-init -l "${KAIROS_INIT_LOG_LEVEL}" validate -t "${TRUSTED_BOOT}"; \
     locale-gen en_US.UTF-8; \
     update-locale LANG=en_US.UTF-8; \
     echo "LANG=en_US.UTF-8" > /etc/default/locale;
 
 COPY root-fs /
 RUN \
-    sed -i "s/kairos/${DEFAULT_USER}/g" /system/oem/10_accounting.yaml;
+    if [ -f /system/oem/10_accounting.yaml ]; then \
+        sed -i "s/kairos/${DEFAULT_USER}/g" /system/oem/10_accounting.yaml; \
+    fi;
 
 FROM ${BASE_IMAGE} AS final-kairos
 
