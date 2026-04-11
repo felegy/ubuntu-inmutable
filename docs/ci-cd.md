@@ -7,6 +7,10 @@ Both GitHub Actions and Gitea Actions call the same launcher entrypoint:
 ./build.sh ci --push true --image <registry/image> --verbosity normal
 ```
 
+Bundle builds support Docker major-version selection through `DOCKER_VERSION`.
+Allowed values are `latest` or a numeric major (for example `27`).
+When a major is provided, the docker bundle resolves the newest available patch release in the Docker apt repository.
+
 The launcher scripts are responsible for:
 
 - checking whether `dotnet` is already available,
@@ -64,6 +68,10 @@ Authentication:
 
 - Uses `GITHUB_TOKEN` via `docker/login-action` for GHCR publishing.
 
+Bundle workflow environment:
+
+- `DOCKER_VERSION` defaults to `latest` and can be overridden via repository variable `DOCKER_VERSION`.
+
 Release behavior:
 
 - Trigger: `release.published`
@@ -81,6 +89,10 @@ Required secrets:
 - Optional: `REGISTRY_HOST` if publishing somewhere else later.
 
 The workflow mirrors the same script entrypoint and relies on compatible runners with Docker, Buildx, and .NET support.
+
+Bundle workflow environment:
+
+- `DOCKER_VERSION` defaults to `latest` and can be overridden via variable `DOCKER_VERSION`.
 
 ## Verbosity
 

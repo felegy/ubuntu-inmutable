@@ -97,6 +97,19 @@ Resolve k3s versions dynamically:
     --skip-trivy-ignore false
 ```
 
+### Build Docker Bundle with Major Version Pin
+
+Build only the docker bundle and let the bundle resolve the newest available patch release for a major version:
+
+```bash
+DOCKER_VERSION=27 dotnet script bundles/build.csx -- bundle-ci --bundle docker --push false
+```
+
+Supported values for docker bundle version selection:
+
+- `latest` (default behavior)
+- numeric major version only, for example `27`
+
 ### Build Options
 
 The build system supports fine-grained configuration via CLI flags:
@@ -157,6 +170,11 @@ The build system supports fine-grained configuration via CLI flags:
 - `--verbosity normal`
     Build output verbosity: `quiet`, `minimal`, `normal`, `detailed`, `diagnostic` (default: `normal`)
 
+#### Bundle Configuration
+
+- `--docker-version 27`
+    Docker bundle input, accepts only `latest` or numeric major version (default: `latest`, env: `DOCKER_VERSION`)
+
 ### Build Targets
 
 #### Full CI Flow
@@ -184,6 +202,7 @@ All build flags support environment variable fallback:
 export KAIROS_VERSION=0.3.1
 export KUBERNETES_DISTRO=k3s
 export KUBERNETES_VERSION=v1.29.1+k3s1
+export DOCKER_VERSION=27
 export SKIP_TRIVY_IGNORE=true
 export BUILD_VERBOSITY=normal
 
@@ -206,6 +225,7 @@ In CI, `KAIROS_VERSION` is resolved from the latest repository tag (for example 
 | `BASE_IMAGE` | `--base-image` | `ubuntu:24.04` |
 | `KUBERNETES_DISTRO` | `--kubernetes-distro` | (none) |
 | `KUBERNETES_VERSION` | `--kubernetes-version` | (none) |
+| `DOCKER_VERSION` | `--docker-version` | `latest` |
 | `IMAGE_EXTRA_TAG` | `--image-extra-tag` | (none) |
 | `BUILD_VERBOSITY` | `--verbosity` | `normal` |
 | `IS_PRIMARY_TAG_TARGET` | (CI matrix env) | `false` |

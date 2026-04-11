@@ -1,0 +1,16 @@
+FROM alpine AS build
+ENV VERSION=v3.5.21
+ARG TARGETARCH
+
+RUN apk add --no-cache wget tar gzip && \
+    wget -O /tmp/etcd-${VERSION}-linux-${TARGETARCH}.tar.gz \
+    https://github.com/etcd-io/etcd/releases/download/${VERSION}/etcd-${VERSION}-linux-${TARGETARCH}.tar.gz && \
+    tar -xzf /tmp/etcd-${VERSION}-linux-${TARGETARCH}.tar.gz -C /tmp && \
+    chmod +x /tmp/etcd-${VERSION}-linux-${TARGETARCH}/etcd /tmp/etcd-${VERSION}-linux-${TARGETARCH}/etcdctl
+
+FROM scratch
+ARG TARGETARCH
+COPY ./run.sh /
+COPY ./run.csx /
+COPY --from=build /tmp/etcd-v3.5.21-linux-${TARGETARCH}/etcd ./
+COPY --from=build /tmp/etcd-v3.5.21-linux-${TARGETARCH}/etcdctl ./

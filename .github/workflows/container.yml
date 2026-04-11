@@ -1,6 +1,9 @@
 name: container-ci
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
@@ -122,20 +125,22 @@ jobs:
       matrix: ${{ fromJson(needs.resolve-versions.outputs.matrix) }}
     env:
       CI: "true"
-      BUILD_VERBOSITY: normal
+      BUILD_VERBOSITY: ${{ vars.BUILD_VERBOSITY || (github.event_name == 'release' && 'debug') || 'normal' }}
       IMAGE_NAME: ghcr.io/${{ github.repository }}
-      BASE_IMAGE: ubuntu:24.04
-      KAIROS_INIT_VERSION: 0.7.0
-      KAIROS_DEFAULT_USER: kairos
-      KAIROS_VARIANT: core
-      KAIROS_MODEL: generic
-      KAIROS_TRUSTED_BOOT: "false"
+      BASE_IMAGE: ${{ vars.BASE_IMAGE || 'ubuntu:24.04' }}
+      KAIROS_INIT_VERSION: ${{ vars.KAIROS_INIT_VERSION || '0.7.0' }}
+      KAIROS_DEFAULT_USER: ${{ github.repository_owner}}
+      KAIROS_VARIANT: ${{ vars.KAIROS_VARIANT || 'core' }}
+      KAIROS_MODEL: ${{ vars.KAIROS_MODEL || 'generic' }}
+      KAIROS_TRUSTED_BOOT: ${{ vars.KAIROS_TRUSTED_BOOT || 'false' }}
       KAIROS_VERSION: ${{ needs.resolve-versions.outputs.kairos_version }}
       KUBERNETES_DISTRO: ${{ matrix.kubernetes_distro }}
       KUBERNETES_VERSION: ${{ matrix.kubernetes_version }}
       IMAGE_EXTRA_TAG: ${{ matrix.image_extra_tag }}
       IS_PRIMARY_TAG_TARGET: ${{ matrix.is_primary_tag_target }}
-      KAIROS_DEBS: open-vm-tools
+      KAIROS_DEBS: >
+        nfs-common
+        ${{ vars.KAIROS_DEBS || 'open-vm-tools' }}
     steps:
       - name: Decide whether this matrix entry should run
         id: gate
@@ -228,3 +233,43 @@ jobs:
             build/SHA256SUMS
           overwrite_files: true
           fail_on_unmatched_files: false
+
+  build-bundles:
+    needs: validate
+    runs-on: ubuntu-latest
+    env:
+      CI: "true"
+      BUILD_VERBOSITY: ${{ vars.BUILD_VERBOSITY || 'normal' }}
+      DOCKER_VERSION: ${{ vars.DOCKER_VERSION || 'latest' }}
+      IMAGE_NAME: ghcr.io/${{ github.repository }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Bundle E2E Smoke (PR)
+        if: ${{ github.event_name == 'pull_request' }}
+        run: ./tests/bundle-e2e.sh helm
+
+      - name: Bundle E2E Full (main/release/manual)
+        if: ${{ github.event_name != 'pull_request' }}
+        run: ./tests/bundle-e2e.sh all
+
+      - name: Login to GHCR
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Bundle CI
+        if: ${{ github.event_name != 'pull_request' }}
+        run: dotnet script bundles/build.csx -- bundle-ci --push true --verbosity "$BUILD_VERBOSITY"

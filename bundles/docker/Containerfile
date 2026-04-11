@@ -1,0 +1,46 @@
+FROM ubuntu:24.04 AS builder
+ARG TARGETARCH
+ENV DOTNET_VERSION=10.0.0
+ARG DOCKER_VERSION=latest
+
+# Install curl, wget, gpg for downloads and key verification
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl wget gnupg ca-certificates bash && \
+    rm -rf /var/lib/apt/lists/*
+
+# Add Docker official GPG key and repository
+RUN install -m 0755 -d /etc/apt/keyrings && \
+    wget -O /tmp/docker.gpg https://download.docker.com/linux/ubuntu/gpg && \
+    gpg --dearmor -o /etc/apt/keyrings/docker.gpg /tmp/docker.gpg && \
+    chmod a+r /etc/apt/keyrings/docker.gpg && \
+    echo "deb [arch=${TARGETARCH} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu jammy stable" > /etc/apt/sources.list.d/docker.list
+
+# Download Docker packages
+RUN mkdir -p /packages && \
+    apt-get update && \
+    if [ "${DOCKER_VERSION}" = "latest" ]; then \
+        apt-get install -y --download-only -o Dir::Cache::Archives=/packages \
+        docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; \
+    else \
+        docker_ce_version="$(apt-cache madison docker-ce | awk '{print $3}' | grep -E "^([0-9]+:)?${DOCKER_VERSION}\\." | sort -V | tail -n 1)"; \
+        docker_ce_cli_version="$(apt-cache madison docker-ce-cli | awk '{print $3}' | grep -E "^([0-9]+:)?${DOCKER_VERSION}\\." | sort -V | tail -n 1)"; \
+        if [ -z "${docker_ce_version}" ] || [ -z "${docker_ce_cli_version}" ]; then \
+            echo "No Docker packages found for major version ${DOCKER_VERSION}." >&2; \
+            exit 1; \
+        fi; \
+        apt-get install -y --download-only -o Dir::Cache::Archives=/packages \
+        docker-ce="${docker_ce_version}" docker-ce-cli="${docker_ce_cli_version}" containerd.io docker-buildx-plugin docker-compose-plugin; \
+    fi
+
+# Download dotnet runtime
+RUN mkdir -p /dotnet && \
+    curl -fsSL https://dot.net/v1/dotnet-install.sh -o /dotnet/dotnet-install.sh && \
+    chmod +x /dotnet/dotnet-install.sh && \
+    arch=$(if [ "${TARGETARCH}" = "arm64" ]; then echo "arm64"; else echo "x64"; fi) && \
+    /dotnet/dotnet-install.sh --version 10.0.0 --runtime dotnet --install-dir /dotnet --architecture "${arch}" --no-path
+
+FROM scratch
+COPY ./run.sh /
+COPY ./run.csx /
+COPY --from=builder /packages/ ./deb/
+COPY --from=builder /dotnet /dotnet
