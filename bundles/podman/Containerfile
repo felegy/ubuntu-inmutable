@@ -4,7 +4,7 @@ ENV DOTNET_VERSION=10.0.0
 
 # Install curl, wget for downloads
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl wget ca-certificates && \
+    curl wget ca-certificates bash && \
     rm -rf /var/lib/apt/lists/*
 
 # Download Podman packages (from Ubuntu main repos, no extra GPG key needed)
@@ -14,10 +14,11 @@ RUN mkdir -p /packages && \
     podman
 
 # Download dotnet runtime
-RUN mkdir -p /dotnet && cd /dotnet && \
-    wget https://dotnetcli.blob.core.windows.net/dotnet/Runtime/${DOTNET_VERSION}/dotnet-runtime-${DOTNET_VERSION}-linux-${TARGETARCH}.tar.gz && \
-    tar -xzf dotnet-runtime-${DOTNET_VERSION}-linux-${TARGETARCH}.tar.gz && \
-    rm -f dotnet-runtime-${DOTNET_VERSION}-linux-${TARGETARCH}.tar.gz
+RUN mkdir -p /dotnet && \
+    curl -fsSL https://dot.net/v1/dotnet-install.sh -o /dotnet/dotnet-install.sh && \
+    chmod +x /dotnet/dotnet-install.sh && \
+    arch=$(if [ "${TARGETARCH}" = "arm64" ]; then echo "arm64"; else echo "x64"; fi) && \
+    /dotnet/dotnet-install.sh --version 10.0.0 --runtime dotnet --install-dir /dotnet --architecture "${arch}" --no-path
 
 FROM scratch
 COPY ./run.sh /

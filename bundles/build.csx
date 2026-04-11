@@ -21,6 +21,11 @@ var pushOption = new SC.Option<bool?>("--push")
     Description = "Push images to registry"
 };
 
+var dockerVersionOption = new SC.Option<string?>("--docker-version")
+{
+    Description = "Docker major version for docker bundle: latest|<major> (default: latest)"
+};
+
 var verbosityOption = new SC.Option<string?>("--verbosity")
 {
     Description = "Output verbosity: quiet|minimal|normal|detailed|diagnostic (default: normal)"
@@ -29,6 +34,7 @@ var verbosityOption = new SC.Option<string?>("--verbosity")
 var root = new SC.RootCommand("Bundle build orchestrator for ubuntu-inmutable");
 root.Options.Add(bundleOption);
 root.Options.Add(pushOption);
+root.Options.Add(dockerVersionOption);
 root.Options.Add(verbosityOption);
 root.TreatUnmatchedTokensAsErrors = false;
 
@@ -38,6 +44,7 @@ var parseResult = root.Parse(Args.ToArray());
 // Extract typed option values with fallbacks
 var bundleName = parseResult.GetValue(bundleOption);
 var push = parseResult.GetValue(pushOption) ?? IsCi();
+var dockerVersion = ResolveDockerVersion(parseResult.GetValue(dockerVersionOption));
 var verbosity = ResolveVerbosity(parseResult.GetValue(verbosityOption));
 
 // Resolve image name prefix
@@ -65,6 +72,7 @@ Target("print-context", () =>
 
     Console.WriteLine($"Image Prefix: {imageName}");
     Console.WriteLine($"Push: {push}");
+    Console.WriteLine($"DockerVersion: {dockerVersion}");
     Console.WriteLine($"SHA: {gitSha}");
     Console.WriteLine($"Verbosity: {ToDisplayString(verbosity)}");
     Console.WriteLine($"Bundles to build: {string.Join(", ", bundlesToBuild)}");
@@ -118,6 +126,11 @@ void BuildBundle(string bundleName)
         outputMode,
         "."
     };
+
+    if (bundleName.Equals("docker", StringComparison.OrdinalIgnoreCase))
+    {
+        buildArgParts.Insert(6, $"--build-arg DOCKER_VERSION={dockerVersion}");
+    }
 
     var buildCommand = string.Join(" ", buildArgParts);
     var currentDir = Environment.CurrentDirectory;
@@ -222,6 +235,29 @@ static bool IsCi()
 {
     var value = Environment.GetEnvironmentVariable("CI");
     return string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+}
+
+// Resolve docker major version from CLI/env and validate accepted format.
+static string ResolveDockerVersion(string? cliValue)
+{
+    var value = cliValue;
+    if (string.IsNullOrWhiteSpace(value))
+    {
+        value = Environment.GetEnvironmentVariable("DOCKER_VERSION");
+    }
+
+    var normalized = string.IsNullOrWhiteSpace(value) ? "latest" : value.Trim().ToLowerInvariant();
+    if (normalized == "latest")
+    {
+        return normalized;
+    }
+
+    if (normalized.All(char.IsDigit))
+    {
+        return normalized;
+    }
+
+    throw new InvalidOperationException($"Invalid docker version '{value}'. Allowed values: latest or numeric major (e.g. 27).");
 }
 
 // Resolve verbosity from CLI, env, or default

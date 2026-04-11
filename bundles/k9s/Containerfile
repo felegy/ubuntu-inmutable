@@ -9,6 +9,7 @@ RUN apk add --no-cache wget tar gzip && \
     chmod +x /tmp/k9s
 
 FROM scratch
+ARG TARGETARCH
 COPY ./run.sh /
 COPY ./run.csx /
 COPY --from=build /tmp/k9s ./

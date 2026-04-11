@@ -1,6 +1,9 @@
 name: container-ci
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
@@ -237,6 +240,7 @@ jobs:
     env:
       CI: "true"
       BUILD_VERBOSITY: ${{ vars.BUILD_VERBOSITY || 'normal' }}
+      DOCKER_VERSION: ${{ vars.DOCKER_VERSION || 'latest' }}
       IMAGE_NAME: ghcr.io/${{ github.repository }}
     steps:
       - name: Checkout
@@ -250,7 +254,16 @@ jobs:
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Bundle E2E Smoke (PR)
+        if: ${{ github.event_name == 'pull_request' }}
+        run: ./tests/bundle-e2e.sh helm
+
+      - name: Bundle E2E Full (main/release/manual)
+        if: ${{ github.event_name != 'pull_request' }}
+        run: ./tests/bundle-e2e.sh all
+
       - name: Login to GHCR
+        if: ${{ github.event_name != 'pull_request' }}
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -258,4 +271,5 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run Bundle CI
+        if: ${{ github.event_name != 'pull_request' }}
         run: dotnet script bundles/build.csx -- bundle-ci --push true --verbosity "$BUILD_VERBOSITY"

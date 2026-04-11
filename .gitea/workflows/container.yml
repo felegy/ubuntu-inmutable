@@ -1,6 +1,9 @@
 name: container-ci
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
@@ -162,6 +165,7 @@ jobs:
     env:
       CI: "true"
       BUILD_VERBOSITY: ${{ vars.BUILD_VERBOSITY || 'normal' }}
+      DOCKER_VERSION: ${{ vars.DOCKER_VERSION || 'latest' }}
       IMAGE_NAME: ghcr.io/${{ gitea.repository }}
     steps:
       - name: Checkout
@@ -177,8 +181,18 @@ jobs:
           docker buildx create --use --name ci-builder || docker buildx use ci-builder
           docker buildx inspect --bootstrap
 
+      - name: Bundle E2E Smoke (PR)
+        if: ${{ gitea.event_name == 'pull_request' }}
+        run: ./tests/bundle-e2e.sh helm
+
+      - name: Bundle E2E Full (main/manual)
+        if: ${{ gitea.event_name != 'pull_request' }}
+        run: ./tests/bundle-e2e.sh all
+
       - name: Login to GHCR
+        if: ${{ gitea.event_name != 'pull_request' }}
         run: echo "${{ secrets.REGISTRY_TOKEN }}" | docker login ghcr.io -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
 
       - name: Run Bundle CI
+        if: ${{ gitea.event_name != 'pull_request' }}
         run: dotnet script bundles/build.csx -- bundle-ci --push true --verbosity "$BUILD_VERBOSITY"

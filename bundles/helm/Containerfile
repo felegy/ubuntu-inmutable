@@ -9,6 +9,7 @@ RUN apk add --no-cache wget tar gzip && \
     chmod +x /tmp/linux-${TARGETARCH}/helm
 
 FROM scratch
+ARG TARGETARCH
 COPY ./run.sh /
 COPY ./run.csx /
 COPY --from=build /tmp/linux-${TARGETARCH}/helm ./
